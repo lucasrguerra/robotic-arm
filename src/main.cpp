@@ -24,17 +24,20 @@
 #define SERVO_HAND_PIN GPIO_NUM_26
 #define SERVO_CLAW_PIN GPIO_NUM_25
 
-#define SERVO_MAX_SIGNAL 2500
-#define SERVO_MIN_SIGNAL 500
-#define CONTROL_READ_DELAY 70
-#define SERVO_SET_DELAY 5
+#define RESET_BUTTON_PIN GPIO_NUM_5
+#define MORE_SPEED_BUTTON_PIN GPIO_NUM_17
+#define LESS_SPEED_BUTTON_PIN GPIO_NUM_19
 
-#define RESET_STATE_PIN GPIO_NUM_5
 #define TFT_SCL GPIO_NUM_18
 #define TFT_SDA GPIO_NUM_23
 #define TFT_RST GPIO_NUM_4
 #define TFT_DC GPIO_NUM_2
 #define TFT_CS GPIO_NUM_15
+
+#define SERVO_MAX_SIGNAL 2500
+#define SERVO_MIN_SIGNAL 500
+#define READ_CONTROL_DELAY 70
+#define SET_SERVO_DELAY 5
 
 
 
@@ -62,26 +65,32 @@ typedef struct {
   }
 } ServoParameters;
 
-ServoParameters base = {Servo(), 90, CONTROL_X_1, SERVO_BASE_PIN, 180, 0, true, 1};
-ServoParameters shoulder = {Servo(), 40, CONTROL_Y_1, SERVO_SHOULDER_PIN, 180, 0, false, 1};
-ServoParameters elbow = {Servo(), 110, CONTROL_Y_3, SERVO_ELBOW_PIN, 180, 0, false, 1};
+
+
+ServoParameters base = {Servo(), 90, CONTROL_X_1, SERVO_BASE_PIN, 180, 0, false, 1};
+ServoParameters shoulder = {Servo(), 40, CONTROL_Y_1, SERVO_SHOULDER_PIN, 180, 0, true, 1};
+ServoParameters elbow = {Servo(), 110, CONTROL_Y_3, SERVO_ELBOW_PIN, 180, 0, true, 1};
 ServoParameters wrist = {Servo(), 135, CONTROL_Y_2, SERVO_WRIST_PIN, 180, 0, false, 1};
 ServoParameters hand = {Servo(), 90, CONTROL_X_2, SERVO_HAND_PIN, 180, 0, false, 1};
-ServoParameters claw = {Servo(), 90, CONTROL_X_3, SERVO_CLAW_PIN, 160, 70, false, 5};
-
+ServoParameters claw = {Servo(), 90, CONTROL_X_3, SERVO_CLAW_PIN, 160, 70, true, 5};
 Adafruit_ST7789 display = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 
 
 
 void read_control(void *pvParameters);
 void set_servo(void *pvParameters);
-void check_reset_state(void *pvParameters);
+void check_reset_button(void *pvParameters);
+void check_more_speed_button(void *pvParameters);
+void check_less_speed_button(void *pvParameters);
 void update_display(void *pvParameters);
+void clear_display(void *pvParameters);
 
 
 
 void setup() {
   Serial.begin(115200);
+  Serial2.begin(115200);
+  Serial2.end();
 
 
   display.init(135, 240, SPI_MODE0);
@@ -104,46 +113,45 @@ void setup() {
 
 
   BaseType_t task_read_control_base = xTaskCreate(read_control, "read_control_base", (configMINIMAL_STACK_SIZE + 256), &base, 2, NULL);
-  if (task_read_control_base == pdFAIL) { Serial.println("Task read_control_base failed to create"); }
-
-  BaseType_t task_set_servo_base = xTaskCreate(set_servo, "set_servo_base", (configMINIMAL_STACK_SIZE), &base, 1, NULL);
-  if (task_set_servo_base == pdFAIL) { Serial.println("Task set_servo_base failed to create"); }
-
   BaseType_t task_read_control_shoulder = xTaskCreate(read_control, "read_control_shoulder", (configMINIMAL_STACK_SIZE + 256), &shoulder, 2, NULL);
-  if (task_read_control_shoulder == pdFAIL) { Serial.println("Task read_control_shoulder failed to create"); }
-
-  BaseType_t task_set_servo_shoulder = xTaskCreate(set_servo, "set_servo_shoulder", (configMINIMAL_STACK_SIZE), &shoulder, 1, NULL);
-  if (task_set_servo_shoulder == pdFAIL) { Serial.println("Task set_servo_shoulder failed to create"); }
-
-  BaseType_t task_read_control_elbow = xTaskCreate(read_control, "read_control_elbow", (configMINIMAL_STACK_SIZE + 256), &elbow, 2, NULL);
-  if (task_read_control_elbow == pdFAIL) { Serial.println("Task read_control_elbow failed to create"); }
-
-  BaseType_t task_set_servo_elbow = xTaskCreate(set_servo, "set_servo_elbow", (configMINIMAL_STACK_SIZE), &elbow, 1, NULL);
-  if (task_set_servo_elbow == pdFAIL) { Serial.println("Task set_servo_elbow failed to create"); }
-
   BaseType_t task_read_control_wrist = xTaskCreate(read_control, "read_control_wrist", (configMINIMAL_STACK_SIZE + 256), &wrist, 2, NULL);
-  if (task_read_control_wrist == pdFAIL) { Serial.println("Task read_control_wrist failed to create"); }
-
-  BaseType_t task_set_servo_wrist = xTaskCreate(set_servo, "set_servo_wrist", (configMINIMAL_STACK_SIZE), &wrist, 1, NULL);
-  if (task_set_servo_wrist == pdFAIL) { Serial.println("Task set_servo_wrist failed to create"); }
-
+  BaseType_t task_read_control_elbow = xTaskCreate(read_control, "read_control_elbow", (configMINIMAL_STACK_SIZE + 256), &elbow, 2, NULL);
   BaseType_t task_read_control_hand = xTaskCreate(read_control, "read_control_hand", (configMINIMAL_STACK_SIZE + 256), &hand, 2, NULL);
-  if (task_read_control_hand == pdFAIL) { Serial.println("Task read_control_hand failed to create"); }
-
-  BaseType_t task_set_servo_hand = xTaskCreate(set_servo, "set_servo_hand", (configMINIMAL_STACK_SIZE), &hand, 1, NULL);
-  if (task_set_servo_hand == pdFAIL) { Serial.println("Task set_servo_hand failed to create"); }
-
   BaseType_t task_read_control_claw = xTaskCreate(read_control, "read_control_claw", (configMINIMAL_STACK_SIZE + 256), &claw, 2, NULL);
+  if (task_read_control_base == pdFAIL) { Serial.println("Task read_control_base failed to create"); }
+  if (task_read_control_shoulder == pdFAIL) { Serial.println("Task read_control_shoulder failed to create"); }
+  if (task_read_control_elbow == pdFAIL) { Serial.println("Task read_control_elbow failed to create"); }
+  if (task_read_control_wrist == pdFAIL) { Serial.println("Task read_control_wrist failed to create"); }
+  if (task_read_control_hand == pdFAIL) { Serial.println("Task read_control_hand failed to create"); }
   if (task_read_control_claw == pdFAIL) { Serial.println("Task read_control_hand failed to create"); }
 
+
+  BaseType_t task_set_servo_base = xTaskCreate(set_servo, "set_servo_base", (configMINIMAL_STACK_SIZE), &base, 1, NULL);
+  BaseType_t task_set_servo_shoulder = xTaskCreate(set_servo, "set_servo_shoulder", (configMINIMAL_STACK_SIZE), &shoulder, 1, NULL);
+  BaseType_t task_set_servo_elbow = xTaskCreate(set_servo, "set_servo_elbow", (configMINIMAL_STACK_SIZE), &elbow, 1, NULL);
+  BaseType_t task_set_servo_wrist = xTaskCreate(set_servo, "set_servo_wrist", (configMINIMAL_STACK_SIZE), &wrist, 1, NULL);
+  BaseType_t task_set_servo_hand = xTaskCreate(set_servo, "set_servo_hand", (configMINIMAL_STACK_SIZE), &hand, 1, NULL);
   BaseType_t task_set_servo_claw = xTaskCreate(set_servo, "set_servo_claw", (configMINIMAL_STACK_SIZE), &claw, 1, NULL);
+  if (task_set_servo_base == pdFAIL) { Serial.println("Task set_servo_base failed to create"); }
+  if (task_set_servo_shoulder == pdFAIL) { Serial.println("Task set_servo_shoulder failed to create"); }
+  if (task_set_servo_elbow == pdFAIL) { Serial.println("Task set_servo_elbow failed to create"); }
+  if (task_set_servo_wrist == pdFAIL) { Serial.println("Task set_servo_wrist failed to create"); }
+  if (task_set_servo_hand == pdFAIL) { Serial.println("Task set_servo_hand failed to create"); }
   if (task_set_servo_claw == pdFAIL) { Serial.println("Task set_servo_claw failed to create"); }
 
-  BaseType_t task_check_reset_state = xTaskCreate(check_reset_state, "check_reset_state", (configMINIMAL_STACK_SIZE + 1024), NULL, 3, NULL);
-  if (task_check_reset_state == pdFAIL) { Serial.println("Task check_reset_state failed to create"); }
+
+  BaseType_t task_check_reset_button = xTaskCreate(check_reset_button, "check_reset_button", (configMINIMAL_STACK_SIZE), NULL, 3, NULL);
+  BaseType_t task_check_more_speed_button = xTaskCreate(check_more_speed_button, "check_more_speed_button", (configMINIMAL_STACK_SIZE), NULL, 3, NULL);
+  BaseType_t task_check_less_speed_button = xTaskCreate(check_less_speed_button, "check_less_speed_button", (configMINIMAL_STACK_SIZE), NULL, 3, NULL);
+  if (task_check_reset_button == pdFAIL) { Serial.println("Task check_reset_button failed to create"); }
+  if (task_check_more_speed_button == pdFAIL) { Serial.println("Task check_more_speed_button failed to create"); }
+  if (task_check_less_speed_button == pdFAIL) { Serial.println("Task check_less_speed_button failed to create"); }
+
 
   BaseType_t task_update_display = xTaskCreate(update_display, "update_display", (configMINIMAL_STACK_SIZE + 1024), NULL, 4, NULL);
+  BaseType_t task_clear_display = xTaskCreate(clear_display, "clear_display", (configMINIMAL_STACK_SIZE), NULL, 4, NULL);
   if (task_update_display == pdFAIL) { Serial.println("Task update_display failed to create"); }
+  if (task_clear_display == pdFAIL) { Serial.println("Task clear_display failed to create"); }
 }
 
 
@@ -174,7 +182,7 @@ void read_control(void *pvParameters) {
     
     parameters->angle = new_angle;
 
-    vTaskDelay(CONTROL_READ_DELAY);
+    vTaskDelay(READ_CONTROL_DELAY);
   }
 }
 
@@ -185,20 +193,21 @@ void set_servo(void *pvParameters) {
 
   while (true) {
     parameters->updateServo();
-    vTaskDelay(SERVO_SET_DELAY);
+    vTaskDelay(SET_SERVO_DELAY);
   }
 }
 
 
 
-void check_reset_state(void *pvParameters) {
+void check_reset_button(void *pvParameters) {
   while (true) {
-    bool reset_state = digitalRead(RESET_STATE_PIN);
+    bool reset_state = digitalRead(RESET_BUTTON_PIN);
     if (reset_state == LOW) {
+      Serial.println("Resettting");
       base.angle = 90;
-      shoulder.angle = 90;
-      elbow.angle = 90;
-      wrist.angle = 90;
+      shoulder.angle = 40;
+      elbow.angle = 110;
+      wrist.angle = 135;
       hand.angle = 90;
       claw.angle = 90;
     }
@@ -208,9 +217,40 @@ void check_reset_state(void *pvParameters) {
 
 
 
+void check_more_speed_button(void *pvParameters) {
+  while (true) {
+    bool more_speed_state = digitalRead(MORE_SPEED_BUTTON_PIN);
+    if (more_speed_state == HIGH) {
+      Serial.println("More speed");
+      shoulder.velocity = 5;
+      elbow.velocity = 5;
+      wrist.velocity = 5;
+      hand.velocity = 5;
+    }
+    vTaskDelay(20);
+  }
+}
+
+
+
+void check_less_speed_button(void *pvParameters) {
+  while (true) {
+    bool less_speed_state = digitalRead(LESS_SPEED_BUTTON_PIN);
+    if (less_speed_state == HIGH) {
+      Serial.println("Less speed");
+      shoulder.velocity = 1;
+      elbow.velocity = 1;
+      wrist.velocity = 1;
+      hand.velocity = 1;
+    }
+    vTaskDelay(20);
+  }
+}
+
+
+
 void update_display(void *pvParameters) {
   while (true) {
-    display.fillScreen(ST77XX_BLACK);
     display.setCursor(0, 0);
     display.setTextSize(2);
     display.setTextColor(ST77XX_WHITE);
@@ -245,6 +285,15 @@ void update_display(void *pvParameters) {
     display.setTextColor(ST77XX_MAGENTA);
     display.println(claw.angle);
 
-    vTaskDelay(50);
+    vTaskDelay(10);
+  }
+}
+
+
+
+void clear_display(void *pvParameters) {
+  while (true) {
+    display.fillScreen(ST77XX_BLACK);
+    vTaskDelay(20);
   }
 }
